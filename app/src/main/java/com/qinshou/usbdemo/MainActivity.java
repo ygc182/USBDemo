@@ -16,14 +16,17 @@ import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
-import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Iterator;
 
-public class MainActivity extends AppCompatActivity {
+import static android.media.MediaRecorder.VideoEncoder.H264;
+
+public class MainActivity extends AppCompatActivity implements View.OnClickListener {
 
     private static final String TAG = "MainActivity";
     private TextView mUSBState;
@@ -32,13 +35,15 @@ public class MainActivity extends AppCompatActivity {
     private TextView mTvResult;
     private Button mBtnSendData;
     private Button mBtnStopSendData;
-    private ScrollView mSv;
+    private Button mBtnReceiveData;
+    private Button mBtnStopReceiveData;
 
     private UsbManager mUsbManager;
     public static final String ACTION_DEVICE_PERMISSION = "com.linc.USB_PERMISSION";
     private PendingIntent mPermissionIntent;
     private LoopThread mLoopThread;
     private int mResult;
+    private LoopThread mReceiveDataThread;
 
 
     @Override
@@ -55,7 +60,8 @@ public class MainActivity extends AppCompatActivity {
         mTvResult = (TextView) findViewById(R.id.result);
         mBtnSendData = (Button) findViewById(R.id.btnSendData);
         mBtnStopSendData = (Button) findViewById(R.id.btnStopSendData);
-        mSv = (ScrollView) findViewById(R.id.sv);
+        mBtnReceiveData = (Button) findViewById(R.id.btnReceiveData);
+        mBtnStopReceiveData = (Button) findViewById(R.id.btnStopReceiveData);
         mUsbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
         initListener();
     }
@@ -72,54 +78,250 @@ public class MainActivity extends AppCompatActivity {
         IntentFilter permissionFilter = new IntentFilter(ACTION_DEVICE_PERMISSION);
         registerReceiver(mUsbPermissionReceiver, permissionFilter);
 
-        mBtnStopSendData.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                if (mLoopThread != null && !mLoopThread.mExit) {
-                    mLoopThread.exitLoop();
-                    Toast.makeText(MainActivity.this, "已停止发送！", Toast.LENGTH_SHORT).show();
-                }
-            }
-        });
+        mBtnSendData.setOnClickListener(this);
+        mBtnStopSendData.setOnClickListener(this);
+        mBtnReceiveData.setOnClickListener(this);
+        mBtnStopReceiveData.setOnClickListener(this);
+    }
 
-        mBtnSendData.setOnClickListener(new View.OnClickListener() {
+    @Override
+    public void onClick(View v) {
+        switch (v.getId()) {
+            case R.id.btnSendData:
+//                startSendData();
+                break;
+            case R.id.btnStopSendData:
+                stopSendData();
+                break;
+            case R.id.btnReceiveData:
+//                startReceiveData();
+                break;
+            case R.id.btnStopReceiveData:
+                stopReceiveData();
+                break;
+        }
+    }
+
+    private void stopReceiveData() {
+        if (mReceiveDataThread != null && !mReceiveDataThread.mExit) {
+            mReceiveDataThread.exitLoop();
+            Toast.makeText(MainActivity.this, "已停止接收！", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void startReceiveData() {
+//        new LoopThread() {
+//            int total = 0;
+//            byte[] buffer = new byte[1024 * 1024];
+//
+//            @Override
+//            public void run() {
+//                Log.d(TAG, "run: ...........");
+//                long start = 0;
+//                while (true) {
+////                    Log.d(TAG, "run: start loop........");
+//                    int receiveResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointIn, buffer, buffer.length, 0);
+////                    Log.d(TAG, "run: receiveResul.....  " + receiveResult);
+//                    if (receiveResult > 0) {
+////                        Log.d(TAG, "run: resultStr..."+resultStr);
+//                        if (start == 0) {
+//                            start = System.currentTimeMillis();
+//                            Log.d(TAG, "run: start time....." + start);
+//                        }
+//                        total = total + receiveResult;
+////                        Log.d(TAG, "run: total length。。。。" + total);
+//                        if (total >= 200 * 1024 * 1024) {
+//                            break;
+//                        }
+//                    } else {
+//                        Log.d(TAG, "run: receiveResul.....  " + receiveResult);
+//
+//                    }
+//                }
+//                long end = System.currentTimeMillis();
+//                Log.d(TAG, "startReceiveData: end  -  start  : " + (end - start));
+//            }
+//        }.start();
+//        Log.d(TAG, "startReceiveData: receiveThread.start().........");
+
+        // 开启轮询接收数据---测试只接受frame
+        mReceiveDataThread = new LoopThread() {
+
+            byte[] buffer = new byte[512];
+
             @Override
-            public void onClick(View v) {
-                mLoopThread = new LoopThread() {
-                    @Override
-                    public void run() {
-                        int count = 0;
-                        while (!mExit) {
-                            //需要在另一个线程中进行
-                            try {
-                                Log.d(TAG, "run: begin send data..........");
-                                String data = "hello world ! " + count;
-                                if (mUsbDeviceConnection == null) {
-                                    Log.e(TAG, "run: mUsbDeviceConnection is null!!!!!!!");
-                                    return;
-                                }
-                                mResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointOut, data.getBytes(), data.length(), 1000);
-                                runOnUiThread(new Runnable() {
-                                    @Override
-                                    public void run() {
-                                        mTvResult.append("result: count--" + mResult + "\n");
-                                    }
-                                });
-                                Log.d(TAG, "run: mResult --------" + mResult);
-                                count++;
-                                Thread.sleep(500);
-                            } catch (InterruptedException e) {
-                                Log.e(TAG, "run: Exception happened:  -------" + e.getMessage());
-                                e.printStackTrace();
-                            }
+            public void run() {
+                Log.d(TAG, "run: begin....................");
+                int videoDataLength = 0;
+                int total = 0;
+                while (true) {
+
+                    // c. 解析frame请求，获取类型，长度
+
+                    int receiveResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointIn, buffer, buffer.length, 0);
+                    Log.d(TAG, "run: receiveResult......" + receiveResult);  // receiveResult......512
+
+                    if (receiveResult > 0) {
+
+                        total = total + receiveResult;
+                        Log.d(TAG, "run: total....." + total);
+                        if (total == 512) {
+//                            CACHETYPE:VIDEO#TYPE:H264#LEN:XXXX#FRAMENUM:xxxx#000000		----发送video
+                            String receiveData = new String(buffer);
+                            Log.d(TAG, "run: receiveData----" + receiveData);
+                            String[] spilts = receiveData.split("#");
+                            String lenStr = (spilts[2].split(":"))[1];
+                            Log.d(TAG, "run: lenStr......" + lenStr);
+                            videoDataLength = Integer.parseInt(lenStr);  // 768000
+
+                            break;
                         }
 
+                    } else {
+                        Log.d(TAG, "run: receiveResult---" + receiveResult);
+                        break;
                     }
-                };
-                mLoopThread.start();
-                Toast.makeText(MainActivity.this, "begin sending data....", Toast.LENGTH_SHORT).show();
+                }
+
+                int readedLen = 0;
+                Log.d(TAG, "run: videoDataLength..." + videoDataLength);  // run: videoDataLength...768000
+                int readPerLength = 16 * 1024;        //  每次读到 16k
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                while (true) {
+                    byte[] bytes;
+                    int unreadLength = videoDataLength - readedLen;
+                    if (unreadLength > readPerLength) {
+                        bytes = new byte[readPerLength];
+                    } else {
+                        bytes = new byte[unreadLength];
+                    }
+                    int currLength = mUsbDeviceConnection.bulkTransfer(mUsbEndpointIn, bytes, bytes.length, 0);
+
+                    if (currLength > 0) {
+                        Log.d(TAG, "loopToGetData...1.readedLen:" + readedLen + ",currLength" + currLength);
+                        baos.write(bytes, 0, currLength);
+                        readedLen = readedLen + currLength;
+                        Log.d(TAG, "loopToGetData...2.readedLen:" + readedLen + ",currLength" + currLength);
+                    }
+
+                    if (currLength <= 0 || readedLen >= videoDataLength) {
+                        Log.d(TAG, "loopToGetData...complete...currLength:" + currLength + ",readedLen:" + readedLen + ",videoDataLength" + videoDataLength);
+                        byte[] finalBytes = baos.toByteArray();
+                        Log.d(TAG, "loopToGetData...finalGetData:" + finalBytes.length);
+                        break;
+                    }
+
+                }
             }
-        });
+        };
+        mReceiveDataThread.start();
+
+//        // 开启轮询接收数据
+//        mReceiveDataThread = new LoopThread() {
+//            @Override
+//            public void run() {
+//                while (!mExit) {
+//
+//                    // b. 发送frame请求
+////                    CACHETYPE:VIDEO#CMD:REQUEST FRAME#		----请求video
+//                    String requstFrame = "CACHETYPE:VIDEO#CMD:REQUEST FRAME#";
+//                    ByteBuffer byteBuffer = ByteBuffer.allocate(512);
+//                    byteBuffer.put(requstFrame.getBytes(), 0, requstFrame.getBytes().length);
+//                    Log.d(TAG, "requstFrame: byteBuffer.remaining()----" + byteBuffer.remaining());
+//                    byte[] b = new byte[byteBuffer.remaining()];
+//                    byteBuffer.get(b, 0, b.length);
+//                    Log.d(TAG, "requstFrame: b.length---" + b.length);
+//                    int frameRequestResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointOut, b, b.length, 0);
+//                    Log.d(TAG, "requstFrame: frameRequestResult---------" + frameRequestResult);
+//
+//                    if (frameRequestResult > 0) {
+//                        // c. 解析frame请求，获取类型，长度
+//                        byte[] buffer = new byte[512 * 1024];
+//                        int receiveResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointIn, buffer, buffer.length, 0);
+//                        Log.d(TAG, "run: receiveResult---" + receiveResult);
+//                        if (receiveResult > 0) {
+////                        CACHETYPE:VIDEO#TYPE:H264#LEN:XXXX#FRAMENUM:xxxx#		----发送video
+//                            String receiveData = new String(buffer);
+//                            Log.d(TAG, "run: receiveData----" + receiveData);
+//                            String[] spilts = receiveData.split("#");
+//                            for (String sp : spilts) {
+//                                Log.d(TAG, "run: sp-----" + sp);
+//                            }
+//                            String lenStr = (spilts[2].split(":"))[1];
+//                            int lenth = Integer.getInteger(lenStr);
+//
+//                            // d. 请求具体数据
+//                            byte[] videBuffer = new byte[lenth];
+//                            int vedioDataLength = mUsbDeviceConnection.bulkTransfer(mUsbEndpointOut, videBuffer, lenth, 0);
+//                            Log.d(TAG, "run: vedioDataLength-----" + vedioDataLength);
+//                        }
+//                    }
+//
+//
+//                }
+//            }
+//        };
+//        mReceiveDataThread.start();
+    }
+
+    private void stopSendData() {
+        if (mLoopThread != null && !mLoopThread.mExit) {
+            mLoopThread.exitLoop();
+            Toast.makeText(MainActivity.this, "已停止发送！", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private void startSendData() {
+        Log.d(TAG, "startSendData: ");
+        if (mUsbDeviceConnection == null) {
+            Log.e(TAG, "run: mUsbDeviceConnection is null!!!!!!!");
+            return;
+        }
+        // a. 预备通信
+        String startHead = "CACHETYPE:VIDEO#CMD:START#";
+        ByteBuffer byteBuffer = ByteBuffer.allocate(512);
+        byteBuffer.put(startHead.getBytes(), 0, startHead.getBytes().length);
+        Log.d(TAG, "startSendData: byteBuffer.remaining()----" + byteBuffer.remaining());
+        byte[] b = new byte[byteBuffer.remaining()];
+        byteBuffer.get(b, 0, b.length);
+        Log.d(TAG, "startSendData: b.length---" + b.length);
+        mResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointOut, b, b.length, 0);
+        Log.d(TAG, "startSendData: mResult---------" + mResult);
+
+        if (mResult > 0) {
+//            startReceiveData();
+        }
+//        mLoopThread = new LoopThread() {
+//            @Override
+//            public void run() {
+//                int count = 0;
+//                while (!mExit) {
+//                    //需要在另一个线程中进行
+//                    try {
+//                        Log.d(TAG, "run: begin send data..........");
+//                        String data = "hello world ! " + count;
+//                        if (mUsbDeviceConnection == null) {
+//                            Log.e(TAG, "run: mUsbDeviceConnection is null!!!!!!!");
+//                            return;
+//                        }
+//                        mResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointOut, data.getBytes(), data.length(), 0);
+//                        runOnUiThread(new Runnable() {
+//                            @Override
+//                            public void run() {
+//                                mTvResult.append("result: count--" + mResult + "\n");
+//                            }
+//                        });
+//                        Log.d(TAG, "run: mResult --------" + mResult);
+//                        count++;
+//                    } catch (Exception e) {
+//                        Log.e(TAG, "run: Exception happened:  -------" + e.getMessage());
+//                        e.printStackTrace();
+//                    }
+//                }
+//            }
+//        };
+//        mLoopThread.start();
+        Toast.makeText(MainActivity.this, "begin sending data....", Toast.LENGTH_SHORT).show();
     }
 
     class LoopThread extends Thread {
@@ -134,10 +336,8 @@ public class MainActivity extends AppCompatActivity {
     protected void onDestroy() {
         unregisterReceiver(mUsbReceiver);
         unregisterReceiver(mUsbPermissionReceiver);
-        if (mLoopThread != null && !mLoopThread.mExit) {
-            mLoopThread.exitLoop();
-            Toast.makeText(MainActivity.this, "已停止发送！", Toast.LENGTH_SHORT).show();
-        }
+        stopSendData();
+        stopReceiveData();
         super.onDestroy();
     }
 
@@ -166,7 +366,9 @@ public class MainActivity extends AppCompatActivity {
 
                     // 判断device是否已经获得权限
 //                    if (device.getProductId() == 13824 && device.getVendorId() == 5118) {
-                    if (device.getProductId() == 0xa4a0 && device.getVendorId() == 0x054c) {
+//                    if (device.getProductId() == 0xa4a0 && device.getVendorId() == 0x054c) {
+                    if (0x0525 == device.getVendorId() && 0xa4a5 == device.getProductId()) {
+
                         if (mUsbManager.hasPermission(device)) {
                             Log.d(TAG, " hasPermission...");
                             Toast.makeText(context, "This device has Permission...", Toast.LENGTH_SHORT).show();
@@ -208,6 +410,17 @@ public class MainActivity extends AppCompatActivity {
         }
     };
 
+    /**
+     * 从设备接收数据bulkIn
+     *
+     * @return
+     */
+    private byte[] receiveMessageFromPoint(int timeout) {
+        byte[] buffer = new byte[15];
+        int receiveResult = mUsbDeviceConnection.bulkTransfer(mUsbEndpointIn, buffer, buffer.length, timeout);
+        return buffer;
+    }
+
     private UsbEndpoint mUsbEndpointIn;
     private UsbEndpoint mUsbEndpointOut;
     private UsbInterface mUsbInterface;
@@ -218,7 +431,8 @@ public class MainActivity extends AppCompatActivity {
         Log.d(TAG, "initCommunication: ......");
         mUSBState3.append("initCommunication in\n");
 //        if (1234 == device.getVendorId() && 5678 == device.getProductId()) {
-        if (0x054c == device.getVendorId() && 0xa4a0 == device.getProductId()) {
+//        if (0x054c == device.getVendorId() && 0xa4a0 == device.getProductId()) {
+        if (0x0525 == device.getVendorId() && 0xa4a5 == device.getProductId()) {
             mUSBState3.append("initCommunication in right device\n");
             Log.d(TAG, "initCommunication in right device: ......");
             int interfaceCount = device.getInterfaceCount();
@@ -267,6 +481,10 @@ public class MainActivity extends AppCompatActivity {
                             // 到此你的android设备已经连上zigbee设备
                             Toast.makeText(this, "open设备成功", Toast.LENGTH_SHORT).show();
                             Log.d(TAG, "initCommunication: open设备成功");
+
+                            startReceiveData();
+
+                            Log.d(TAG, "initCommunication: end !!!!!!!!!!");
                         }
 
                     } else {
