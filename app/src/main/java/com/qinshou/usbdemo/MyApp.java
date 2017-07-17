@@ -10,20 +10,15 @@ import android.content.Context;
 
 public class MyApp extends Application {
 
-    public static final String TAG = "MyApp";
     public static Context mContext;
 
-    public static Context getInstance() {
-        return mContext;
-    }
+    private static MyApp instance;
 
     @Override
     public void onCreate() {
         super.onCreate();
         mContext = this;
-
-//        Intent usbServiceIntent = new Intent(mContext, UsbService.class);
-//        startService(usbServiceIntent);
+        instance = this;
 
     }
 }
